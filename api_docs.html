@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>E-Commerce Platform API Documentation</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            line-height: 1.6;
+            margin: 20px;
+            background-color: #f8f9fa;
+            color: #333;
+        }
+        h1, h2, h3 {
+            color: #0056b3;
+            border-bottom: 1px solid #dee2e6;
+            padding-bottom: 5px;
+        }
+        h1 { font-size: 2em; }
+        h2 { font-size: 1.5em; margin-top: 30px; }
+        h3 { font-size: 1.2em; margin-top: 20px; }
+        code {
+            background-color: #da08fa;
+            padding: 2px 5px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        pre {
+            background-color: #343a40;
+            color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .endpoint {
+            background-color: #fff;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        .method {
+            font-weight: bold;
+            padding: 3px 8px;
+            border-radius: 3px;
+            color: #fff;
+            margin-right: 10px;
+        }
+        .method-get { background-color: #28a745; }
+        .method-post { background-color: #007bff; }
+        .method-patch { background-color: #fd7e14; }
+        .method-delete { background-color: #dc3545; }
+        .auth {
+            font-style: italic;
+            color: #6c757d;
+            font-size: 0.9em;
+        }
+        .param-type {
+            font-style: italic;
+            color: #6c757d;
+            margin-left: 5px;
+        }
+    </style>
+</head>
+<body>
+
+<h1>E-Commerce Platform API Documentation</h1>
+<p>Base URL for all requests: <code>http://localhost:8080</code></p>
+
+<section id="authentication">
+    <h2>Authentication</h2>
+    <p>Most endpoints require authentication via a JWT Bearer token.</p>
+    <p>You can obtain a temporary test token using the <code>/generate-test-token/:userID</code> endpoint (see below). Provide the generated token in the <code>Authorization</code> header for subsequent requests:</p>
+    <pre><code>Authorization: Bearer <your_jwt_token></code></pre>
+    <p class="auth">The API Gateway validates the token and forwards the authenticated <code>userID</code> to the downstream services via the <code>X-User-ID</code> header.</p>
+</section>
+
+<section id="gateway-endpoints">
+    <h2>API Gateway Specific Endpoints</h2>
+
+    <div class="endpoint">
+        <h3><span class="method method-get">GET</span> /generate-test-token/:userID</h3>
+        <p>Generates a temporary JWT token valid for 1 hour for testing purposes.</p>
+        <p class="auth">Authentication: Public</p>
+        <h4>Path Parameters:</h4>
+        <ul>
+            <li><code>userID</code><span class="param-type">(integer, required)</span>: The user ID to include in the token claims.</li>
+        </ul>
+        <h4>Example Request:</h4>
+        <pre><code>GET http://localhost:8080/generate-test-token/123</code></pre>
+        <h4>Successful Response (200 OK):</h4>
+        <pre><code>{
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxMjMsImlzcyI6..."
+}</code></pre>
+        <h4>Error Responses:</h4>
+        <ul>
+            <li><code>400 Bad Request</code>: Invalid userID format.
+                <pre><code>{ "error": "Invalid user ID format" }</code></pre>
+            </li>
+            <li><code>500 Internal Server Error</code>: Failed to sign the token.
+                <pre><code>{ "error": "Failed to generate token" }</code></pre>
+            </li>
+        </ul>
+    </div>
+
+    <div class="endpoint">
+        <h3><span class="method method-get">GET</span> /health</h3>
+        <p>Checks the health status of the API Gateway.</p>
+        <p class="auth">Authentication: Public</p>
+        <h4>Successful Response (200 OK):</h4>
+        <pre><code>{
+    "status": "UP"
+}</code></pre>
+    </div>
+</section>
+
+<section id="inventory-endpoints">
+    <h2>Inventory Service (via /inventory)</h2>
+    <p class="auth">All endpoints in this section require JWT Authentication.</p>
+
+    <div class="endpoint">
+        <h3><span class="method method-post">POST</span> /inventory/categories</h3>
+        <p>Creates a new product category.</p>
+        <h4>Request Body:</h4>
+        <pre><code>{
+    "name": "Electronics"
+}</code></pre>
+        <h4>Successful Response (201 Created):</h4>
+        <pre><code>{
+    "Status": "Success",
+    "Message": "Category created successfully",
+    "Data": {
+        "id": 1,
+        "name": "Electronics"
+    }
+}</code></pre>
+        <h4>Error Responses:</h4>
+        <ul>
+            <li><code>400 Bad Request</code>: Invalid request body (e.g., missing name).
+                <pre><code>{ "Status": "Fail", "Message": "Invalid request body: ..." }</code></pre>
+            </li>
+            <li><code>401 Unauthorized</code>: Missing or invalid JWT token (handled by Gateway).
+                <pre><code>{ "error": "Authorization header required" }</code></pre>
+            </li>
+            <li><code>409 Conflict</code>: Category with the same name already exists.
+                <pre><code>{ "Status": "Fail", "Message": "Failed to create category: category with name 'Electronics' already exists" }</code></pre>
+            </li>
+            <li><code>502 Bad Gateway</code>: If Inventory Service is down or unreachable (handled by Gateway).</li>
+        </ul>
+    </div>
+
+    <div class="endpoint">
+        <h3><span class="method method-get">GET</span> /inventory/categories</h3>
+        <p>Lists all available product categories.</p>
+        <h4>Successful Response (200 OK):</h4>
+        <pre><code>{
+    "Status": "Success",
+    "Message": "Categories listed successfully",
+    "Data": [
+        { "id": 1, "name": "Electronics" },
+        { "id": 2, "name": "Books" }
+    ]
+}</code></pre>
+        <h4>Error Responses:</h4>
+        <ul>
+            <li><code>401 Unauthorized</code>: Missing or invalid JWT token.</li>
+            <li><code>502 Bad Gateway</code>: If Inventory Service is down.</li>
+        </ul>
+    </div>
+
+    <div class="endpoint">
+        <h3><span class="method method-get">GET</span> /inventory/categories/{id}</h3>
+        <p>Retrieves a specific category by its ID.</p>
+        <h4>Path Parameters:</h4>
+        <ul>
+            <li><code>id</code><span class="param-type">(integer, required)</span>: The ID of the category to retrieve.</li>
+        </ul>
+        <h4>Successful Response (200 OK):</h4>
+        <pre><code>{
+    "Status": "Success",
+    "Message": "Category retrieved successfully",
+    "Data": {
+        "id": 1,
+        "name": "Electronics"
+    }
+}</code></pre>
+        <h4>Error Responses:</h4>
+        <ul>
+            <li><code>400 Bad Request</code>: Invalid ID format.</li>
+            <li><code>401 Unauthorized</code>: Missing or invalid JWT token.</li>
+            <li><code>404 Not Found</code>: Category with the specified ID does not exist.
+                <pre><code>{ "Status": "Fail", "Message": "Failed to retrieve category: category with id 1 not found" }</code></pre>
+            </li>
+            <li><code>502 Bad Gateway</code>: If Inventory Service is down.</li>
+        </ul>
+    </div>
+
+    <div class="endpoint">
+        <h3><span class="method method-patch">PATCH</span> /inventory/categories/{id}</h3>
+        <p>Updates a category's name by its ID.</p>
+        <h4>Path Parameters:</h4>
+        <ul>
+            <li><code>id</code><span class="param-type">(integer, required)</span>: The ID of the category to update.</li>
+        </ul>
+        <h4>Request Body:</h4>
+        <pre><code>{
+    "name": "Consumer Electronics"
+}</code></pre>
+        <h4>Successful Response (200 OK):</h4>
+        <pre><code>{
+    "Status": "Success",
+    "Message": "Category updated successfully",
+    "Data": {
+        "id": 1,
+        "name": "Consumer Electronics"
+    }
+}</code></pre>
+        <h4>Error Responses:</h4>
+        <ul>
+            <li><code>400 Bad Request</code>: Invalid ID format or invalid request body.</li>
+            <li><code>401 Unauthorized</code>: Missing or invalid JWT token.</li>
+            <li><code>404 Not Found</code>: Category with the specified ID does not exist.</li>
+            <li><code>409 Conflict</code>: Another category with the new name already exists.</li>
+            <li><code>502 Bad Gateway</code>: If Inventory Service is down.</li>
+        </ul>
+    </div>
+
+    <div class="endpoint">
+        <h3><span class="method method-delete">DELETE</span> /inventory/categories/{id}</h3>
+        <p>Deletes a category by its ID.</p>
+        <h4>Path Parameters:</h4>
+        <ul>
+            <li><code>id</code><span class="param-type">(integer, required)</span>: The ID of the category to delete.</li>
+        </ul>
+        <h4>Successful Response (200 OK):</h4>
+        <pre><code>{
+    "Status": "Success",
+    "Message": "Category deleted successfully",
+    "Data": null
+}</code></pre>
+        <h4>Error Responses:</h4>
+        <ul>
+            <li><code>400 Bad Request</code>: Invalid ID format.</li>
+            <li><code>401 Unauthorized</code>: Missing or invalid JWT token.</li>
+            <li><code>404 Not Found</code>: Category with the specified ID does not exist.
+                <pre><code>{ "Status": "Fail", "Message": "Failed to delete category: category with id 99 not found for deletion" }</code></pre>
+            </li>
+            <li><code>500 Internal Server Error</code>: If deletion fails due to constraints (e.g., products still using it, depending on DB setup).</li>
+            <li><code>502 Bad Gateway</code>: If Inventory Service is down.</li>
+        </ul>
+    </div>
+
+    <hr> <!-- Separator for products -->
+
+    <div class="endpoint">
+        <h3><span class="method method-post">POST</span> /inventory/products</h3>
+        <p>Creates a new product.</p>
+        <h4>Request Body:</h4>
+        <pre><code>{
+    "name": "Laptop Pro",
+    "price": 1299.99,
+    "stock": 50,
+    "category_id": 1  // Use 0 or omit for no category
+}</code></pre>
+        <h4>Successful Response (201 Created):</h4>
+        <pre><code>{
+    "Status": "Success",
+    "Message": "Product created successfully",
+    "Data": {
+        "id": 101,
+        "name": "Laptop Pro",
+        "price": 1299.99,
+        "stock": 50,
+        "category_id": 1
+    }
+}</code></pre>
+        <h4>Error Responses:</h4>
+        <ul>
+            <li><code>400 Bad Request</code>: Invalid request body (e.g., missing name, price <= 0, stock < 0, non-existent category_id).
+                <pre><code>{ "Status": "Fail", "Message": "Failed to create product: category with id 99 does not exist" }</code></pre>
+                <pre><code>{ "Status": "Fail", "Message": "Failed to create product: product price must be positive" }</code></pre>
+            </li>
+            <li><code>401 Unauthorized</code>: Missing or invalid JWT token.</li>
+            <li><code>502 Bad Gateway</code>: If Inventory Service is down.</li>
+        </ul>
+    </div>
+
+    <div class="endpoint">
+        <h3><span class="method method-get">GET</span> /inventory/products</h3>
+        <p>Lists products. Supports pagination and filtering by category.</p>
+        <h4>Query Parameters:</h4>
+        <ul>
+            <li><code>limit</code><span class="param-type">(integer, optional, default: 10)</span>: Max number of products per page (capped at 100).</li>
+            <li><code>offset</code><span class="param-type">(integer, optional, default: 0)</span>: Number of products to skip.</li>
+            <li><code>category_id</code><span class="param-type">(integer, optional)</span>: Filter products by a specific category ID.</li>
+        </ul>
+        <h4>Example Request (Paginated):</h4>
+        <pre><code>GET http://localhost:8080/inventory/products?limit=5&offset=10</code></pre>
+        <h4>Example Request (Filtered):</h4>
+        <pre><code>GET http://localhost:8080/inventory/products?category_id=1</code></pre>
+        <h4>Successful Response (200 OK):</h4>
+        <pre><code>{
+    "Status": "Success",
+    "Message": "Products retrieved successfully",
+    "Data": [
+        {
+            "id": 1,
+            "name": "Laptop Pro",
+            "price": 1299.99,
+            "stock": 50,
+            "category_id": 1
+        },
+        // ... more products
+    ]
+}</code></pre>
+        <h4>Error Responses:</h4>
+        <ul>
+            <li><code>400 Bad Request</code>: Invalid query parameter format (e.g., non-integer limit/offset/category_id).</li>
+            <li><code>401 Unauthorized</code>: Missing or invalid JWT token.</li>
+            <li><code>404 Not Found</code>: If filtering by a non-existent category_id.</li>
+            <li><code>502 Bad Gateway</code>: If Inventory Service is down.</li>
+        </ul>
+    </div>
+
+    <div class="endpoint">
+        <h3><span class="method method-get">GET</span> /inventory/products/{id}</h3>
+        <p>Retrieves a specific product by its ID.</p>
+        <h4>Path Parameters:</h4>
+        <ul>
+            <li><code>id</code><span class="param-type">(integer, required)</span>: The ID of the product to retrieve.</li>
+        </ul>
+        <h4>Successful Response (200 OK):</h4>
+        <pre><code>{
+    "Status": "Success",
+    "Message": "Product retrieved successfully",
+    "Data": {
+        "id": 1,
+        "name": "Laptop Pro",
+        "price": 1299.99,
+        "stock": 50,
+        "category_id": 1
+    }
+}</code></pre>
+        <h4>Error Responses:</h4>
+        <ul>
+            <li><code>400 Bad Request</code>: Invalid ID format.</li>
+            <li><code>401 Unauthorized</code>: Missing or invalid JWT token.</li>
+            <li><code>404 Not Found</code>: Product with the specified ID does not exist.
+                <pre><code>{ "Status": "Fail", "Message": "Failed to retrieve product: product with id 1 not found" }</code></pre>
+            </li>
+            <li><code>502 Bad Gateway</code>: If Inventory Service is down.</li>
+        </ul>
+    </div>
+
+    <div class="endpoint">
+        <h3><span class="method method-patch">PATCH</span> /inventory/products/{id}</h3>
+        <p>Partially updates a product by its ID. Only include fields you want to change.</p>
+        <h4>Path Parameters:</h4>
+        <ul>
+            <li><code>id</code><span class="param-type">(integer, required)</span>: The ID of the product to update.</li>
+        </ul>
+        <h4>Request Body (Example: Update only stock and price):</h4>
+        <pre><code>{
+    "stock": 45,
+    "price": 1249.00
+}</code></pre>
+        <h4>Successful Response (200 OK):</h4>
+        <pre><code>{
+    "Status": "Success",
+    "Message": "Product updated successfully",
+    "Data": {
+        "id": 1,
+        "name": "Laptop Pro", // Name remains unchanged
+        "price": 1249.00,     // Price updated
+        "stock": 45,          // Stock updated
+        "category_id": 1      // Category remains unchanged
+    }
+}</code></pre>
+        <h4>Error Responses:</h4>
+        <ul>
+            <li><code>400 Bad Request</code>: Invalid ID format, invalid request body (e.g., invalid field value, non-existent category_id).
+                <pre><code>{ "Status": "Fail", "Message": "Failed to update product: product stock cannot be negative if provided for update" }</code></pre>
+            </li>
+            <li><code>401 Unauthorized</code>: Missing or invalid JWT token.</li>
+            <li><code>404 Not Found</code>: Product with the specified ID does not exist.</li>
+            <li><code>502 Bad Gateway</code>: If Inventory Service is down.</li>
+        </ul>
+    </div>
+
+    <div class="endpoint">
+        <h3><span class="method method-delete">DELETE</span> /inventory/products/{id}</h3>
+        <p>Deletes a product by its ID.</p>
+        <h4>Path Parameters:</h4>
+        <ul>
+            <li><code>id</code><span class="param-type">(integer, required)</span>: The ID of the product to delete.</li>
+        </ul>
+        <h4>Successful Response (200 OK):</h4>
+        <pre><code>{
+    "Status": "Success",
+    "Message": "Product deleted successfully",
+    "Data": null
+}</code></pre>
+        <h4>Error Responses:</h4>
+        <ul>
+            <li><code>400 Bad Request</code>: Invalid ID format.</li>
+            <li><code>401 Unauthorized</code>: Missing or invalid JWT token.</li>
+            <li><code>404 Not Found</code>: Product with the specified ID does not exist.
+                <pre><code>{ "Status": "Fail", "Message": "Failed to delete product: product with id 99 not found for deletion" }</code></pre>
+            </li>
+            <li><code>502 Bad Gateway</code>: If Inventory Service is down.</li>
+        </ul>
+    </div>
+</section>
+
+<section id="order-endpoints">
+    <h2>Order Service (via /orders)</h2>
+    <p class="auth">All endpoints in this section require JWT Authentication.</p>
+
+    <div class="endpoint">
+        <h3><span class="method method-post">POST</span> /orders</h3>
+        <p>Creates a new order. Checks product availability and decrements stock in the Inventory Service.</p>
+        <h4>Request Body:</h4>
+        <p>Note: <code>price</code> is the price at the time of order creation.</p>
+        <pre><code>{
+    "items": [
+        {
+            "product_id": 1,
+            "quantity": 2,
+            "price": 1249.00
+        },
+        {
+            "product_id": 5,
+            "quantity": 1,
+            "price": 349.00
+        }
+    ]
+}</code></pre>
+        <h4>Successful Response (201 Created):</h4>
+        <pre><code>{
+    "Status": "Success",
+    "Message": "Order created successfully",
+    "Data": {
+        "id": 1,
+        "user_id": 123, // User ID from JWT token
+        "items": [
+            { "product_id": 1, "quantity": 2, "price": 1249.00 },
+            { "product_id": 5, "quantity": 1, "price": 349.00 }
+        ],
+        "status": "pending",
+        "created_at": "2023-10-27T10:00:00Z",
+        "updated_at": "2023-10-27T10:00:00Z"
+    }
+}</code></pre>
+        <h4>Error Responses:</h4>
+        <ul>
+            <li><code>400 Bad Request</code>: Invalid request body (e.g., empty items, invalid quantity/price/product_id).
+                <pre><code>{ "Status": "Fail", "Message": "Invalid request body: items cannot be empty" }</code></pre>
+            </li>
+            <li><code>401 Unauthorized</code>: Missing or invalid JWT token.</li>
+            <li><code>404 Not Found</code>: If a `product_id` in `items` does not exist in Inventory.
+                <pre><code>{ "Status": "Fail", "Message": "Failed to create order: inventory check failed for product 999: product with ID 999 not found in inventory" }</code></pre>
+            </li>
+            <li><code>409 Conflict</code>: Insufficient stock for one of the products.
+                <pre><code>{ "Status": "Fail", "Message": "Failed to create order: insufficient stock for product 1 (requested: 100, available: 45)" }</code></pre>
+            </li>
+            <li><code>500 Internal Server Error</code>: Database error saving the order, or error during stock reservation rollback.</li>
+            <li><code>502 Bad Gateway / 503 Service Unavailable</code>: If Order Service cannot communicate with Inventory Service.
+                <pre><code>{ "Status": "Fail", "Message": "Failed to create order: failed to reserve stock for product 1: failed to communicate with inventory service: ..." }</code></pre>
+            </li>
+        </ul>
+    </div>
+
+    <div class="endpoint">
+        <h3><span class="method method-get">GET</span> /orders/{id}</h3>
+        <p>Retrieves details of a specific order by its ID. Only the owner of the order can access it.</p>
+        <h4>Path Parameters:</h4>
+        <ul>
+            <li><code>id</code><span class="param-type">(integer, required)</span>: The ID of the order to retrieve.</li>
+        </ul>
+        <h4>Successful Response (200 OK):</h4>
+        <pre><code>{
+    "Status": "Success",
+    "Message": "Order retrieved successfully",
+    "Data": {
+        "id": 1,
+        "user_id": 123,
+        "items": [ /* ... order items ... */ ],
+        "status": "pending",
+        "created_at": "2023-10-27T10:00:00Z",
+        "updated_at": "2023-10-27T10:00:00Z"
+    }
+}</code></pre>
+        <h4>Error Responses:</h4>
+        <ul>
+            <li><code>400 Bad Request</code>: Invalid ID format.</li>
+            <li><code>401 Unauthorized</code>: Missing or invalid JWT token.</li>
+            <li><code>403 Forbidden</code>: Authenticated user is not the owner of the order.
+                <pre><code>{ "Status": "Fail", "Message": "You are not authorized to view this order" }</code></pre>
+            </li>
+            <li><code>404 Not Found</code>: Order with the specified ID does not exist.
+                <pre><code>{ "Status": "Fail", "Message": "Failed to retrieve order: order with id 1 not found" }</code></pre>
+            </li>
+            <li><code>502 Bad Gateway</code>: If Order Service is down.</li>
+        </ul>
+    </div>
+
+    <div class="endpoint">
+        <h3><span class="method method-patch">PATCH</span> /orders/{id}</h3>
+        <p>Updates the status of an order (e.g., 'pending', 'completed', 'cancelled'). Only the owner can update. If status changes to 'cancelled', stock is returned to Inventory.</p>
+        <h4>Path Parameters:</h4>
+        <ul>
+            <li><code>id</code><span class="param-type">(integer, required)</span>: The ID of the order to update.</li>
+        </ul>
+        <h4>Request Body:</h4>
+        <pre><code>{
+    "status": "completed"
+}
+// or
+{
+    "status": "cancelled"
+}</code></pre>
+        <h4>Successful Response (200 OK):</h4>
+        <pre><code>{
+    "Status": "Success",
+    "Message": "Order status updated successfully",
+    "Data": {
+        "id": 1,
+        "user_id": 123,
+        "items": [ /* ... order items ... */ ],
+        "status": "completed", // or "cancelled"
+        "created_at": "2023-10-27T10:00:00Z",
+        "updated_at": "2023-10-27T10:05:00Z" // updated_at changes
+    }
+}</code></pre>
+        <h4>Error Responses:</h4>
+        <ul>
+            <li><code>400 Bad Request</code>: Invalid ID format, invalid request body (missing status or invalid status value), invalid status transition (e.g., cancelling a completed order).
+                <pre><code>{ "Status": "Fail", "Message": "Invalid request body: 'status' field is required" }</code></pre>
+                <pre><code>{ "Status": "Fail", "Message": "Failed to update order status: cannot cancel a completed order (ID: 1)" }</code></pre>
+            </li>
+            <li><code>401 Unauthorized</code>: Missing or invalid JWT token.</li>
+            <li><code>403 Forbidden</code>: Authenticated user is not the owner of the order.</li>
+            <li><code>404 Not Found</code>: Order with the specified ID does not exist.</li>
+            <li><code>500 Internal Server Error</code>: Database error saving the status, or CRITICAL error during stock return for cancellation.</li>
+            <li><code>502 Bad Gateway / 503 Service Unavailable</code>: If Order Service cannot communicate with Inventory Service during cancellation stock return.</li>
+        </ul>
+    </div>
+
+    <div class="endpoint">
+        <h3><span class="method method-get">GET</span> /orders</h3>
+        <p>Lists all orders belonging to the authenticated user. Supports pagination.</p>
+        <h4>Query Parameters:</h4>
+        <ul>
+            <li><code>limit</code><span class="param-type">(integer, optional, default: 10)</span>: Max number of orders per page (capped at 100).</li>
+            <li><code>offset</code><span class="param-type">(integer, optional, default: 0)</span>: Number of orders to skip.</li>
+        </ul>
+        <h4>Example Request:</h4>
+        <pre><code>GET http://localhost:8080/orders?limit=5&offset=0</code></pre>
+        <h4>Successful Response (200 OK):</h4>
+        <pre><code>{
+    "Status": "Success",
+    "Message": "Orders retrieved successfully",
+    "Data": [
+        {
+            "id": 5,
+            "user_id": 123,
+            "items": [ /* ... */ ],
+            "status": "completed",
+            "created_at": "2023-10-28T11:00:00Z",
+            "updated_at": "2023-10-28T11:05:00Z"
+        },
+        {
+            "id": 1,
+            "user_id": 123,
+            "items": [ /* ... */ ],
+            "status": "pending",
+            "created_at": "2023-10-27T10:00:00Z",
+            "updated_at": "2023-10-27T10:00:00Z"
+        }
+        // ... more orders for user 123
+    ]
+}</code></pre>
+        <h4>Successful Response (200 OK - No Orders):</h4>
+        <pre><code>{
+    "Status": "Success",
+    "Message": "No orders found for this user",
+    "Data": []
+}</code></pre>
+        <h4>Error Responses:</h4>
+        <ul>
+            <li><code>400 Bad Request</code>: Invalid query parameter format.</li>
+            <li><code>401 Unauthorized</code>: Missing or invalid JWT token.</li>
+            <li><code>500 Internal Server Error</code>: Database error retrieving orders.</li>
+            <li><code>502 Bad Gateway</code>: If Order Service is down.</li>
+        </ul>
+    </div>
+
+</section>
+
+</body>
+</html>
