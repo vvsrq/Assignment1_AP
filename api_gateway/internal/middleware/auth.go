@@ -77,7 +77,7 @@ func JWTMiddleware(secretKey string, log *logrus.Logger) gin.HandlerFunc {
 }
 
 func GenerateTestToken(userID int, secretKey string) (string, error) {
-	expirationTime := time.Now().Add(1 * time.Hour) // Токен действителен 1 час
+	expirationTime := time.Now().Add(1 * time.Hour)
 	claims := &Claims{
 		UserID: userID,
 		RegisteredClaims: jwt.RegisteredClaims{
