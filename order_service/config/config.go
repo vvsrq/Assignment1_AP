@@ -3,43 +3,57 @@ package config
 import (
 	"log"
 	"os"
+	"sync"
 
 	"github.com/joho/godotenv"
+	"github.com/kelseyhightower/envconfig"
+	"github.com/sirupsen/logrus"
 )
 
 type Config struct {
-	DatabaseURL         string
-	Port                string
-	LogLevel            string
-	InventoryServiceURL string
+	DatabaseURL              string `envconfig:"DATABASE_URL"              required:"true"`
+	GrpcPort                 string `envconfig:"GRPC_PORT"                 default:":50052"`
+	LogLevel                 string `envconfig:"LOG_LEVEL"                 default:"info"`
+	InventoryServiceGrpcAddr string `envconfig:"INVENTORY_SERVICE_GRPC_ADDR" required:"true"`
 }
 
-func getEnv(key, fallback string) string {
-	if value, exists := os.LookupEnv(key); exists {
-		return value
-	}
-	if fallback != "" {
-		log.Printf("Warning: Environment variable %s not set, using default value: %s\n", key, fallback)
-	} else {
-		log.Printf("Warning: Environment variable %s not set and no default value provided\n", key)
-	}
-	return fallback
-}
+var (
+	config Config
+	once   sync.Once
+)
 
-func LoadConfig() *Config {
-	err := godotenv.Load()
-	if err != nil {
-		if os.IsNotExist(err) {
-			log.Println("Warning: .env file not found, using environment variables or defaults.")
-		} else {
-			log.Printf("Warning: Error loading .env file: %v", err)
+func LoadConfig(logger *logrus.Logger) *Config {
+	once.Do(func() {
+		err := godotenv.Load()
+		if err != nil && !os.IsNotExist(err) {
+			logger.Warnf("Error loading .env file (but continuing): %v", err)
+		} else if err == nil {
+			logger.Info("Loaded configuration from .env file")
 		}
-	}
 
-	return &Config{
-		DatabaseURL:         getEnv("DATABASE_URL", ""),
-		Port:                getEnv("ORDER_SERVICE_PORT", ":8082"),
-		LogLevel:            getEnv("LOG_LEVEL", "info"),
-		InventoryServiceURL: getEnv("INVENTORY_SERVICE_URL", "http://localhost:8081"),
+		err = envconfig.Process("", &config)
+		if err != nil {
+			logger.Fatalf("Failed to process configuration from environment variables: %v", err)
+		}
+
+		logger.Infof("Configuration loaded: GRPC Port=%s, LogLevel=%s, InventoryServiceGrpcAddr=%s",
+			config.GrpcPort, config.LogLevel, config.InventoryServiceGrpcAddr)
+		if config.DatabaseURL != "" {
+			logger.Info("Configuration loaded: DatabaseURL is set")
+		} else {
+			logger.Fatal("Configuration error: DATABASE_URL is not set")
+		}
+		if config.InventoryServiceGrpcAddr == "" {
+			logger.Fatal("Configuration error: INVENTORY_SERVICE_GRPC_ADDR is not set")
+		}
+
+	})
+	return &config
+}
+
+func GetConfig() *Config {
+	if config.GrpcPort == "" || config.DatabaseURL == "" || config.InventoryServiceGrpcAddr == "" {
+		log.Fatal("Configuration not loaded. Call LoadConfig first.")
 	}
+	return &config
 }

@@ -11,7 +11,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// postgresCategoryRepository realize interface domain.CategoryRepository
 type postgresCategoryRepository struct {
 	db  *sql.DB
 	log *logrus.Logger
@@ -28,8 +27,7 @@ func (r *postgresCategoryRepository) CreateCategory(category *domain.Category) (
 	query := `INSERT INTO categories (name) VALUES ($1) returning id`
 	err := r.db.QueryRow(query, category.Name).Scan(&category.ID)
 	if err != nil {
-		//Check for unique
-		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" { // 23505 - unique_violation
+		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
 			r.log.Warnf("Attempted to create category with duplicate name: %s", category.Name)
 			return nil, fmt.Errorf("category with name '%s' already exists", category.Name)
 		}
@@ -91,7 +89,7 @@ func (r *postgresCategoryRepository) DeleteCategory(id int) error {
 
 	if rowsAffected == 0 {
 		r.log.Warnf("Attempted to delete non-existent category ID %d", id)
-		return fmt.Errorf("category with id %d not found for deletion", id) // Возвращаем ошибку, если ничего не удалено
+		return fmt.Errorf("category with id %d not found for deletion", id)
 	}
 
 	r.log.Infof("Category deleted successfully with ID: %d", id)
@@ -99,7 +97,7 @@ func (r *postgresCategoryRepository) DeleteCategory(id int) error {
 }
 
 func (r *postgresCategoryRepository) ListCategories() ([]domain.Category, error) {
-	query := `SELECT id, name FROM categories ORDER BY id ASC` // Добавим сортировку для консистентности
+	query := `SELECT id, name FROM categories ORDER BY id ASC`
 	rows, err := r.db.Query(query)
 	if err != nil {
 		r.log.Errorf("Failed to list categories: %v", err)
@@ -112,7 +110,7 @@ func (r *postgresCategoryRepository) ListCategories() ([]domain.Category, error)
 		var category domain.Category
 		if err := rows.Scan(&category.ID, &category.Name); err != nil {
 			r.log.Errorf("Failed to scan category row: %v", err)
-			continue // или return nil, err если критично
+			continue
 		}
 		categories = append(categories, category)
 	}

@@ -1,0 +1,136 @@
+syntax = "proto3";
+
+package inventory;
+
+// Замени "your_module_path" на реальный путь твоего Go модуля.
+// Например: "github.com/your_username/project/pkg/inventory_service/grpc/inventorypb"
+option go_package = "inventory_service/pkg/inventory_service/grpc/inventorypb";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/wrappers.proto"; // Для опциональных фильтров
+
+// --- Сообщения для Категорий ---
+
+message Category {
+  int64 id = 1;
+  string name = 2;
+}
+
+message CreateCategoryRequest {
+  string name = 1; // Имя новой категории
+}
+
+// Ответ содержит созданную категорию с ID
+// message CreateCategoryResponse { Category category = 1; } // Можно так
+// Или просто вернуть Category, как в GetCategoryByID
+// Оставим Create/Update/Get возвращать саму сущность для единообразия
+
+message GetCategoryRequest {
+  int64 id = 1; // ID запрашиваемой категории
+}
+
+// Ответ для GetCategoryByID
+// message GetCategoryResponse { Category category = 1; } // Можно так, или просто Category
+
+message UpdateCategoryRequest {
+  // Категория с новыми данными. ID должен быть указан.
+  // В gRPC обычно либо полное обновление, либо FieldMask.
+  // Для простоты категории сделаем полное обновление.
+  Category category = 1;
+}
+
+// Ответ содержит обновленную категорию
+// message UpdateCategoryResponse { Category category = 1; } // Можно так, или просто Category
+
+message DeleteCategoryRequest {
+  int64 id = 1; // ID категории для удаления
+}
+
+// Ответ для DeleteCategory - пустой
+// message DeleteCategoryResponse { google.protobuf.Empty empty = 1; } // Можно так, или просто Empty
+
+message ListCategoriesRequest {
+  // Пока без пагинации/фильтров для категорий, можно добавить по аналогии с продуктами
+}
+
+message ListCategoriesResponse {
+  repeated Category categories = 1; // Список категорий
+}
+
+
+// --- Сообщения для Продуктов ---
+
+message Product {
+  int64 id = 1;
+  string name = 2;
+  double price = 3;       // Используем double для float64
+  int32 stock = 4;        // Используем int32 для int (если stock не бывает > 2 млрд)
+  int64 category_id = 5;  // 0 будет означать отсутствие категории (как у тебя в коде с sql.NullInt64)
+}
+
+message CreateProductRequest {
+  // Данные для создания продукта (без ID)
+  string name = 1;
+  double price = 2;
+  int32 stock = 3;
+  int64 category_id = 4; // 0 или ID существующей категории
+}
+
+// Ответ содержит созданный продукт с ID
+// message CreateProductResponse { Product product = 1; } // Можно так, или просто Product
+
+message GetProductRequest {
+  int64 id = 1; // ID запрашиваемого продукта
+}
+
+// Ответ для GetProductByID
+// message GetProductResponse { Product product = 1; } // Можно так, или просто Product
+
+message UpdateProductRequest {
+  // Продукт с новыми значениями *только* для тех полей, которые нужно обновить.
+  Product product = 1;
+  // FieldMask указывает, какие поля из product нужно применить.
+  // Например: paths: ["name", "price"]
+  google.protobuf.FieldMask update_mask = 2;
+}
+
+// Ответ содержит полностью обновленный продукт
+// message UpdateProductResponse { Product product = 1; } // Можно так, или просто Product
+
+message DeleteProductRequest {
+  int64 id = 1; // ID продукта для удаления
+}
+
+// Ответ для DeleteProduct - пустой
+// message DeleteProductResponse { google.protobuf.Empty empty = 1; } // Можно так, или просто Empty
+
+message ListProductsRequest {
+  int32 limit = 1;  // Лимит записей (например, 10)
+  int32 offset = 2; // Смещение (для пагинации)
+  // Опциональный фильтр по ID категории. Используем обертку, чтобы отличить 0 от отсутствия фильтра.
+  google.protobuf.Int64Value category_id_filter = 3;
+}
+
+message ListProductsResponse {
+  repeated Product products = 1; // Список продуктов
+}
+
+
+// --- Сервис Инвентаря ---
+
+service InventoryService {
+  // Методы для Категорий
+  rpc CreateCategory(CreateCategoryRequest) returns (Category); // Возвращаем созданную категорию
+  rpc GetCategory(GetCategoryRequest) returns (Category);       // Возвращаем найденную категорию
+  rpc UpdateCategory(UpdateCategoryRequest) returns (Category); // Возвращаем обновленную категорию
+  rpc DeleteCategory(DeleteCategoryRequest) returns (google.protobuf.Empty); // Возвращаем пустоту
+  rpc ListCategories(ListCategoriesRequest) returns (ListCategoriesResponse);
+
+  // Методы для Продуктов
+  rpc CreateProduct(CreateProductRequest) returns (Product); // Возвращаем созданный продукт
+  rpc GetProduct(GetProductRequest) returns (Product);       // Возвращаем найденный продукт
+  rpc UpdateProduct(UpdateProductRequest) returns (Product); // Возвращаем обновленный продукт
+  rpc DeleteProduct(DeleteProductRequest) returns (google.protobuf.Empty); // Возвращаем пустоту
+  rpc ListProducts(ListProductsRequest) returns (ListProductsResponse);
+}

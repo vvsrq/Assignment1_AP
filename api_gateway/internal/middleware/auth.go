@@ -1,98 +1,92 @@
 package middleware
 
 import (
-	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/sirupsen/logrus"
 )
 
-type Claims struct {
-	UserID int `json:"user_id"`
-	jwt.RegisteredClaims
-}
-
-func JWTMiddleware(secretKey string, log *logrus.Logger) gin.HandlerFunc {
+func AuthMiddleware(log *logrus.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
-			log.Warn("Authorization header is missing")
+			log.Warn("Middleware: Authorization header is missing")
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Authorization header required"})
 			return
 		}
 
 		parts := strings.Split(authHeader, " ")
 		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-			log.Warnf("Invalid Authorization header format: %s", authHeader)
+			log.Warnf("Middleware: Invalid Authorization header format: %s", authHeader)
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid Authorization header format"})
 			return
 		}
 
-		tokenString := parts[1]
-		claims := &Claims{}
-
-		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
-			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-			}
-			return []byte(secretKey), nil
-		})
-
-		if err != nil {
-			log.Warnf("Failed to parse JWT token: %v", err)
-			if errors.Is(err, jwt.ErrTokenExpired) {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Token expired"})
-			} else if errors.Is(err, jwt.ErrTokenMalformed) {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Malformed token"})
-			} else if errors.Is(err, jwt.ErrTokenNotValidYet) {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Token not active yet"})
-			} else {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
-			}
-			return
-		}
-
-		if !token.Valid {
-			log.Warn("Invalid JWT token provided")
+		rawToken := parts[1]
+		if rawToken == "" {
+			log.Warn("Middleware: Bearer token is empty")
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
 			return
 		}
 
-		if claims.UserID <= 0 {
-			log.Error("UserID missing or invalid in JWT claims")
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Invalid token claims (missing user_id)"})
-			return
-		}
+		log.Debugf("Middleware: Extracted raw token (UUID): %s...", rawToken[:min(10, len(rawToken))])
 
-		c.Set("userID", claims.UserID)
-		log.Infof("JWT authenticated successfully for UserID: %d", claims.UserID)
-
+		c.Set("rawToken", rawToken)
 		c.Next()
 	}
 }
 
-func GenerateTestToken(userID int, secretKey string) (string, error) {
-	expirationTime := time.Now().Add(1 * time.Hour)
-	claims := &Claims{
-		UserID: userID,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(expirationTime),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			NotBefore: jwt.NewNumericDate(time.Now()),
-			Issuer:    "api_gateway", // Пример
-			Subject:   fmt.Sprintf("%d", userID),
-		},
+func min(a, b int) int {
+	if a < b {
+		return a
 	}
+	return b
+}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString([]byte(secretKey))
-	if err != nil {
-		return "", err
+func RequestLogger(logger *logrus.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		startTime := time.Now()
+
+		entry := logger.WithFields(logrus.Fields{
+			"method":     c.Request.Method,
+			"path":       c.Request.URL.Path,
+			"remote_ip":  c.ClientIP(),
+			"user_agent": c.Request.UserAgent(),
+		})
+		if reqID := c.Writer.Header().Get("X-Request-ID"); reqID != "" {
+			entry = entry.WithField("request_id", reqID)
+		}
+		entry.Info("Incoming request")
+
+		c.Next()
+
+		latency := time.Since(startTime)
+		statusCode := c.Writer.Status()
+
+		completedEntry := logger.WithFields(logrus.Fields{
+			"status_code": statusCode,
+			"method":      c.Request.Method,
+			"path":        c.Request.URL.Path,
+			"remote_ip":   c.ClientIP(),
+			"latency_ms":  latency.Milliseconds(),
+		})
+		if reqID := c.Writer.Header().Get("X-Request-ID"); reqID != "" {
+			completedEntry = completedEntry.WithField("request_id", reqID)
+		}
+
+		if len(c.Errors) > 0 {
+			completedEntry.Error(c.Errors.ByType(gin.ErrorTypePrivate).String())
+		} else {
+			if statusCode >= 500 {
+				completedEntry.Error("Request completed with server error")
+			} else if statusCode >= 400 {
+				completedEntry.Warn("Request completed with client error")
+			} else {
+				completedEntry.Info("Request completed successfully")
+			}
+		}
 	}
-	return tokenString, nil
 }

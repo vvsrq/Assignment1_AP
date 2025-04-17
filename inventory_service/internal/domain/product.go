@@ -1,4 +1,3 @@
-// domain/product.go
 package domain
 
 type ProductRepository interface {

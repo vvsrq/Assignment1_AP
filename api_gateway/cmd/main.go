@@ -2,136 +2,167 @@ package main
 
 import (
 	"api_gateway/config"
+	"api_gateway/internal/clients"
+	"api_gateway/internal/handlers"
 	"api_gateway/internal/middleware"
-	"api_gateway/internal/proxy"
-	"encoding/json"
-	"github.com/gin-gonic/gin"
-	"github.com/sirupsen/logrus"
-	"log"
+	"context"
+	"errors"
 	"net/http"
 	"os"
-	"strconv"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/sirupsen/logrus"
 )
 
 func main() {
-
-	cfg := config.LoadConfig()
 	logger := logrus.New()
 	logger.SetOutput(os.Stdout)
+	logger.SetFormatter(&logrus.JSONFormatter{})
+
+	cfg := config.LoadConfig(logger)
 	logLevel, err := logrus.ParseLevel(cfg.LogLevel)
 	if err != nil {
 		logLevel = logrus.InfoLevel
+		logger.Warnf("Invalid log level '%s', using default 'info'. Error: %v", cfg.LogLevel, err)
 	}
 	logger.SetLevel(logLevel)
-	logger.SetFormatter(&logrus.JSONFormatter{})
-	logger.Info("Starting API Gateway...")
-	logger.Infof("Inventory Service target: %s", cfg.InventoryServiceURL)
-	logger.Infof("Order Service target: %s", cfg.OrderServiceURL)
+	logger.Infof("Starting API Gateway...")
+	logger.Infof("Log level set to: %s", logLevel.String())
 
-	inventoryProxy, err := proxy.NewReverseProxy(cfg.InventoryServiceURL, "/inventory", logger)
-	if err != nil {
-		log.Fatalf("FATAL: Failed to create inventory service proxy: %v", err)
-	}
-	orderProxy, err := proxy.NewReverseProxy(cfg.OrderServiceURL, "", logger) // Передаем пустой prefixToStrip
-	if err != nil {
-		log.Fatalf("FATAL: Failed to create order service proxy: %v", err)
-	}
+	clientTimeout := 5 * time.Second
 
-	router := gin.Default()
-	router.RedirectTrailingSlash = false
+	userClient, err := clients.NewUserServiceClient(cfg.UserServiceGrpcAddr, logger, clientTimeout)
+	if err != nil {
+		logger.Fatalf("FATAL: Failed to create User Service client: %v", err)
+	}
+	defer userClient.Close()
+
+	inventoryClient, err := clients.NewInventoryServiceClient(cfg.InventoryServiceGrpcAddr, logger, clientTimeout)
+	if err != nil {
+		logger.Fatalf("FATAL: Failed to create Inventory Service client: %v", err)
+	}
+	defer inventoryClient.Close()
+
+	orderClient, err := clients.NewOrderServiceClient(cfg.OrderServiceGrpcAddr, logger, clientTimeout)
+	if err != nil {
+		logger.Fatalf("FATAL: Failed to create Order Service client: %v", err)
+	}
+	defer orderClient.Close()
+
+	logger.Info("gRPC Clients initialized successfully.")
+
+	router := gin.New()
 	router.Use(gin.Recovery())
+	router.Use(middleware.RequestLogger(logger))
 
-	router.GET("/", func(c *gin.Context) {
-		// c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(htmlDocs))
-	})
+	authHandler := handlers.NewAuthHandler(userClient, logger)
+	userHandler := handlers.NewUserHandler(userClient, logger)
+	productHandler := handlers.NewProductHandler(inventoryClient, logger)
+	categoryHandler := handlers.NewCategoryHandler(inventoryClient, logger)
+	orderHandler := handlers.NewOrderHandler(orderClient, logger)
+	logger.Info("HTTP Handlers initialized.")
 
-	router.GET("/generate-test-token/:userID", func(c *gin.Context) {
+	v1 := router.Group("/api/v1")
 
-		handlerLogger := logger.WithField("handler", "generate-test-token")
-		handlerLogger.Info("Request received")
+	authGroup := v1.Group("/auth")
+	{
+		authGroup.POST("/login", authHandler.Login)
+	}
+	userGroupPublic := v1.Group("/users")
+	{
+		userGroupPublic.POST("/register", userHandler.Register)
+	}
 
-		userIDStr := c.Param("userID")
-		userID, err := strconv.Atoi(userIDStr)
-		if err != nil || userID <= 0 {
-			handlerLogger.Warnf("Invalid user ID format received: %s", userIDStr)
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID format"})
-			return
-		}
-		handlerLogger.Infof("Parsed UserID: %d", userID)
+	// --- Protected Routes ---
+	protected := v1.Group("/")
 
-		handlerLogger.Info("Attempting to generate token...")
-		token, err := middleware.GenerateTestToken(userID, cfg.JWTSecret)
-		if err != nil {
-			handlerLogger.Errorf("Failed to generate test token: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
-			return
-		}
+	protected.Use(middleware.AuthMiddleware(logger))
+	{
 
-		handlerLogger.Infof("Token generated successfully. Value (first 10 chars): %s...", token[:min(10, len(token))])
-
-		responseMap := gin.H{"token": token}
-		handlerLogger.Debugf("Prepared response map: %+v", responseMap)
-
-		responseBytes, jsonErr := json.Marshal(responseMap)
-		if jsonErr != nil {
-
-			handlerLogger.Errorf("!!! Failed to manually marshal response map: %v", jsonErr)
-
-			c.Status(http.StatusInternalServerError)
-			return
-		} else {
-			handlerLogger.Debugf("Manual JSON marshal result: %s", string(responseBytes))
+		// --- Products ---
+		products := protected.Group("/products")
+		{
+			products.POST("", productHandler.CreateProduct)
+			products.GET("", productHandler.ListProducts)
+			products.GET("/:id", productHandler.GetProduct)
+			products.PATCH("/:id", productHandler.UpdateProduct)
+			products.DELETE("/:id", productHandler.DeleteProduct)
 		}
 
-		handlerLogger.Info("Sending token response...")
-		c.JSON(http.StatusOK, responseMap)
-		handlerLogger.Info("Token response supposedly sent.")
+		// Categories
+		categories := protected.Group("/categories")
+		{
+			categories.POST("", categoryHandler.CreateCategory)
+			categories.GET("", categoryHandler.ListCategories)
+			categories.GET("/:id", categoryHandler.GetCategory)
+			categories.PATCH("/:id", categoryHandler.UpdateCategory)
+			categories.DELETE("/:id", categoryHandler.DeleteCategory)
+		}
 
-	})
+		//  Orders
+		orders := protected.Group("/orders")
+		{
+			orders.POST("", orderHandler.CreateOrder)
+			orders.GET("", orderHandler.ListOrders)
+			orders.GET("/:id", orderHandler.GetOrder)
+			orders.PATCH("/:id", orderHandler.UpdateOrderStatus)
+		}
+		userGroupProtected := protected.Group("/users")
+		{
+			userGroupProtected.GET("/profile/:id", userHandler.GetProfile)
+		}
 
+	}
+
+	// --- Health Check ---
 	router.GET("/health", func(c *gin.Context) {
-		logger.WithField("handler", "health").Info("Health check requested")
 		c.JSON(http.StatusOK, gin.H{"status": "UP"})
 	})
 
-	protected := router.Group("/")
-	protected.Use(middleware.JWTMiddleware(cfg.JWTSecret, logger))
-	{
+	//Start HTTP Server with Graceful Shutdown
+	httpServer := &http.Server{
+		Addr:    cfg.GatewayPort,
+		Handler: router,
+	}
 
-		inventoryGroup := protected.Group("/inventory")
-		{
-			inventoryGroup.POST("/categories", proxy.ProxyHandler(inventoryProxy, logger))
-			inventoryGroup.GET("/categories", proxy.ProxyHandler(inventoryProxy, logger))
-			inventoryGroup.GET("/categories/:id", proxy.ProxyHandler(inventoryProxy, logger))
-			inventoryGroup.PATCH("/categories/:id", proxy.ProxyHandler(inventoryProxy, logger))
-			inventoryGroup.DELETE("/categories/:id", proxy.ProxyHandler(inventoryProxy, logger))
+	serverErrChan := make(chan error, 1)
 
-			inventoryGroup.POST("/products", proxy.ProxyHandler(inventoryProxy, logger))
-			inventoryGroup.GET("/products", proxy.ProxyHandler(inventoryProxy, logger))
-			inventoryGroup.GET("/products/:id", proxy.ProxyHandler(inventoryProxy, logger))
-			inventoryGroup.PATCH("/products/:id", proxy.ProxyHandler(inventoryProxy, logger))
-			inventoryGroup.DELETE("/products/:id", proxy.ProxyHandler(inventoryProxy, logger))
+	go func() {
+		logger.Infof("API Gateway listening on %s", cfg.GatewayPort)
+		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Errorf("Failed to start API Gateway server: %v", err)
+			serverErrChan <- err
 		}
+		logger.Info("API Gateway HTTP server stopped serving.")
+		close(serverErrChan)
+	}()
 
-		orderGroup := protected.Group("/orders")
-		{
-			orderGroup.POST("", proxy.ProxyHandler(orderProxy, logger))
-			orderGroup.GET("", proxy.ProxyHandler(orderProxy, logger))
-			orderGroup.Any("/*proxyPath", proxy.ProxyHandler(orderProxy, logger))
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	logger.Info("Signal listener started.")
+
+	select {
+	case sig := <-quit:
+		logger.Warnf("Shutdown signal received: %v", sig)
+	case err := <-serverErrChan:
+		if err != nil {
+			logger.Errorf("Server failed unexpectedly: %v", err)
 		}
 	}
 
-	// --- Start Server ---
-	logger.Infof("API Gateway listening on port %s", cfg.GatewayPort)
-	if err := router.Run(cfg.GatewayPort); err != nil {
-		logger.Errorf("Failed to start API Gateway: %v", err)
-		os.Exit(1)
-	}
-}
+	//Perform Graceful Shutdown
+	logger.Info("Attempting graceful shutdown of HTTP server...")
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
 
-func min(a, b int) int {
-	if a < b {
-		return a
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		logger.Errorf("HTTP server graceful shutdown failed: %v", err)
+	} else {
+		logger.Info("HTTP server gracefully stopped.")
 	}
-	return b
+
+	logger.Info("API Gateway shut down gracefully.")
 }

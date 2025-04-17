@@ -1,74 +1,143 @@
 package main
 
 import (
+	"context" // Import context
+	"database/sql"
+	"fmt"
+	"net"
 	"order_service/config"
 	"order_service/internal/clients"
-	"order_service/internal/delivery"
+	grpcHandler "order_service/internal/delivery/grpc"
 	"order_service/internal/repository"
 	"order_service/internal/usecase"
-	"order_service/pkg/db"
+	orderpb "order_service/proto"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	_ "github.com/lib/pq"
 	"github.com/sirupsen/logrus"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
 )
 
 func main() {
-	cfg := config.LoadConfig()
-	logger := logrus.New()
-	logger.SetOutput(os.Stdout)
+	logger := setupLogger("info")
+
+	cfg := config.LoadConfig(logger)
 	logLevel, err := logrus.ParseLevel(cfg.LogLevel)
 	if err != nil {
-		logLevel = logrus.InfoLevel
-		logger.Warnf("Invalid LOG_LEVEL '%s', using default: %s", cfg.LogLevel, logLevel.String())
+		logger.Warnf("Invalid log level '%s', using default 'info'. Error: %v", cfg.LogLevel, err)
+	} else {
+		logger.SetLevel(logLevel)
 	}
-	logger.SetLevel(logLevel)
-	logger.SetFormatter(&logrus.JSONFormatter{})
-	logger.Info("Starting Order Service...")
-	logger.Infof("Log level set to: %s", logLevel.String())
+	logger.Infof("Starting Order Service (gRPC)...")
 
-	if cfg.DatabaseURL == "" {
-	}
-	database, err := db.Connect(cfg.DatabaseURL)
+	database, err := connectDB(cfg.DatabaseURL, logger)
 	if err != nil {
+		logger.Fatalf("FATAL: Failed to connect to database: %v", err)
 	}
-	defer database.Close()
-	logger.Info("Database connection established.")
+	defer func() {
+		logger.Info("Closing database connection...")
+		if err := database.Close(); err != nil {
+			logger.Errorf("Error closing database: %v", err)
+		}
+	}()
 
-	if cfg.InventoryServiceURL == "" {
-		logger.Fatal("FATAL: Inventory Service URL is not configured. Set INVENTORY_SERVICE_URL.")
+	invClient, err := clients.NewInventoryGRPCClient(cfg.InventoryServiceGrpcAddr, logger, 5*time.Second)
+	if err != nil {
+		logger.Fatalf("FATAL: Failed to create Inventory gRPC client: %v", err)
 	}
-	inventoryClient := clients.NewInventoryHTTPClient(
-		cfg.InventoryServiceURL,
-		5*time.Second,
-		logger,
-	)
-	logger.Infof("Inventory Service Client initialized for target: %s", cfg.InventoryServiceURL)
+	// TODO: Add defer invClient.Close() - requires Close() method in interface/implementation
 
-	// --- Dependency Injection ---
 	orderRepo := repository.NewPostgresOrderRepository(database, logger)
 	logger.Info("Repositories initialized.")
 
-	orderUseCase := usecase.NewOrderUseCase(orderRepo, inventoryClient, logger)
+	orderUseCase := usecase.NewOrderUseCase(orderRepo, invClient, logger)
 	logger.Info("Use cases initialized.")
-	orderHandler := delivery.NewOrderHandler(orderUseCase, logger)
-	logger.Info("Handlers initialized.")
 
-	router := gin.Default()
-	router.RedirectTrailingSlash = false
-	router.Use(func(c *gin.Context) { /* TODO Middleware logging */ })
+	orderGrpcHandler := grpcHandler.NewOrderHandler(orderUseCase, logger)
+	logger.Info("gRPC Handler initialized.")
 
-	orderHandler.RegisterRoutes(router)
-	logger.Info("Routes registered.")
-
-	// --- Start Server ---
-	port := cfg.Port
-	if port == "" || port == ":" {
+	lis, err := net.Listen("tcp", cfg.GrpcPort)
+	if err != nil {
+		logger.Fatalf("Failed to listen on port %s: %v", cfg.GrpcPort, err)
 	}
-	logger.Infof("Starting server on port %s", port)
-	if err := router.Run(port); err != nil {
-		logger.Errorf("Failed to start server on port %s: %v", port, err)
-		os.Exit(1)
+	logger.Infof("gRPC server listening on %s", cfg.GrpcPort)
+
+	grpcServer := grpc.NewServer()
+
+	orderpb.RegisterOrderServiceServer(grpcServer, orderGrpcHandler)
+
+	reflection.Register(grpcServer)
+	logger.Info("gRPC reflection service registered")
+
+	serverErrChan := make(chan error, 1)
+	go func() {
+		logger.Info("Starting gRPC server...")
+		err := grpcServer.Serve(lis)
+		if err != nil && err != grpc.ErrServerStopped {
+			logger.Errorf("gRPC server failed to serve: %v", err)
+			serverErrChan <- err
+		} else {
+			logger.Info("gRPC server stopped serving gracefully.")
+			close(serverErrChan)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	logger.Info("Signal listener started.")
+
+	select {
+	case sig := <-quit:
+		logger.Warnf("Shutdown signal received: %v", sig)
+	case err := <-serverErrChan:
+		if err != nil {
+			logger.Errorf("gRPC server failed unexpectedly: %v", err)
+		}
 	}
+
+	logger.Info("Attempting graceful shutdown of gRPC server...")
+	grpcServer.GracefulStop()
+	logger.Info("gRPC server gracefully stopped.")
+
+	if clientWithCloser, ok := invClient.(interface{ Close() error }); ok {
+		logger.Info("Closing Inventory gRPC client connection...")
+		if err := clientWithCloser.Close(); err != nil {
+			logger.Errorf("Error closing inventory client: %v", err)
+		}
+	}
+
+	logger.Info("Order Service shut down gracefully.")
+
+}
+
+func setupLogger(level string) *logrus.Logger {
+	logger := logrus.New()
+	logger.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
+	logger.SetOutput(os.Stdout)
+	logLevel, err := logrus.ParseLevel(level)
+	if err != nil {
+		logLevel = logrus.InfoLevel
+	}
+	logger.SetLevel(logLevel)
+	return logger
+}
+
+func connectDB(dataSourceName string, logger *logrus.Logger) (*sql.DB, error) {
+	logger.Info("Connecting to database...")
+	db, err := sql.Open("postgres", dataSourceName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open db: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err = db.PingContext(ctx); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to ping db: %w", err)
+	}
+	logger.Info("Database connection established successfully.")
+	return db, nil
 }

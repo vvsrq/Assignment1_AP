@@ -23,7 +23,6 @@ type productUseCase struct {
 	log          *logrus.Logger
 }
 
-// NewProductUseCase (без изменений)
 func NewProductUseCase(pRepo domain.ProductRepository, cRepo domain.CategoryRepository, logger *logrus.Logger) ProductUseCase {
 	return &productUseCase{
 		productRepo:  pRepo,

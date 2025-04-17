@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 type OrderStatus string
 
@@ -29,6 +32,13 @@ type OrderRepository interface {
 	CreateOrder(order *Order) (*Order, error)
 	GetOrderByID(id int) (*Order, error)
 	UpdateOrderStatus(id int, status OrderStatus) (*Order, error)
+	ListOrdersByUserID(userID int, limit, offset int) ([]Order, error)
+}
+
+type OrderUseCase interface {
+	CreateOrder(ctx context.Context, order *Order) (*Order, error)
+	GetOrderByID(id int) (*Order, error)
+	UpdateOrderStatus(ctx context.Context, id int, status OrderStatus) (*Order, error)
 	ListOrdersByUserID(userID int, limit, offset int) ([]Order, error)
 }
 
