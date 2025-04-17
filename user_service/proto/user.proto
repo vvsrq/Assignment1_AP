@@ -1,72 +1,49 @@
-// proto/user/user.proto
 syntax = "proto3";
 
 package user;
 
-// Замени "your_module_path"
 option go_package = "user_service/pkg/user_service/grpc/userpb";
 
 import "google/protobuf/empty.proto";
 
-// --- Сообщения ---
-
-// Базовая информация о пользователе (без пароля)
 message User {
   int64 id = 1;
   string name = 2;
   string email = 3;
 }
 
-// Профиль пользователя (может быть таким же или расширенным)
 message UserProfile {
   int64 id = 1;
   string name = 2;
   string email = 3;
-  // Можно добавить другие поля профиля, если нужно
 }
 
-// Запрос на регистрацию нового пользователя
 message RegisterUserRequest {
   string name = 1;
   string email = 2;
-  string password = 3; // Пароль передается для регистрации
+  string password = 3; 
 }
 
-// Ответ после регистрации (содержит созданного пользователя)
-// message RegisterUserResponse { User user = 1; } // Или просто User
-
-// Запрос на аутентификацию
 message AuthenticateUserRequest {
   string email = 1;
   string password = 2;
 }
 
-// Ответ после аутентификации
 message AuthenticateUserResponse {
-  bool authenticated = 1; // Успешно ли?
-  string token = 2;       // Простой токен (например, JWT или UUID), если успешно
-  int64 user_id = 3;      // ID пользователя, если успешно
-  string error_message = 4; // Сообщение об ошибке, если !authenticated
+  bool authenticated = 1; 
+  string token = 2;       
+  int64 user_id = 3;      
+  string error_message = 4; 
 }
 
-// Запрос на получение профиля пользователя
 message GetUserProfileRequest {
-  int64 user_id = 1; // ID пользователя, чей профиль нужен (можно брать из metadata, если это текущий юзер)
-}
+  int64 user_id = 1; 
 
-// Ответ с профилем пользователя
-// message GetUserProfileResponse { UserProfile profile = 1; } // Или просто UserProfile
-
-
-// --- Сервис Пользователей ---
 
 service UserService {
-  // Регистрация нового пользователя
   rpc RegisterUser(RegisterUserRequest) returns (User);
 
-  // Аутентификация пользователя по email/паролю
   rpc AuthenticateUser(AuthenticateUserRequest) returns (AuthenticateUserResponse);
 
-  // Получение профиля пользователя по ID
   rpc GetUserProfile(GetUserProfileRequest) returns (UserProfile);
 }

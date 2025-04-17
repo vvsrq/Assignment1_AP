@@ -1,96 +1,65 @@
-// proto/order/order.proto
 syntax = "proto3";
 
 package order;
 
-// Замени "your_module_path"
 option go_package = "order_servicepkg/order_service/grpc/orderpb";
 
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto";
 
-// --- Перечисление Статусов Заказа ---
-// Соответствует твоему ENUM 'order_status' и domain.OrderStatus
 enum OrderStatus {
-  ORDER_STATUS_UNSPECIFIED = 0; // Стандартное нулевое значение
-  PENDING = 1;                  // Соответствует 'pending'
-  COMPLETED = 2;                // Соответствует 'completed'
-  CANCELLED = 3;                // Соответствует 'cancelled'
+  ORDER_STATUS_UNSPECIFIED = 0; 
+  PENDING = 1;                  
+  COMPLETED = 2;                
+  CANCELLED = 3;                
 }
 
-// --- Сообщения ---
-
-// Элемент заказа (соответствует domain.OrderItem)
 message OrderItem {
-  int64 product_id = 1; // ID продукта
-  int32 quantity = 2;   // Количество
-  double price = 3;     // Цена на момент заказа (из domain.OrderItem)
+  int64 product_id = 1; 
+  int32 quantity = 2;   
+  double price = 3;     
 }
 
-// Заказ (соответствует domain.Order)
 message Order {
-  int64 id = 1;                   // ID заказа
-  int64 user_id = 2;              // ID пользователя
-  repeated OrderItem items = 3;   // Список позиций заказа
-  OrderStatus status = 4;         // Статус заказа
-  google.protobuf.Timestamp created_at = 5; // Время создания
-  google.protobuf.Timestamp updated_at = 6; // Время последнего обновления
+  int64 id = 1;                   
+  int64 user_id = 2;              
+  repeated OrderItem items = 3;   
+  OrderStatus status = 4;         
+  google.protobuf.Timestamp created_at = 5; 
+  google.protobuf.Timestamp updated_at = 6; 
 }
 
-// Запрос на создание заказа
 message CreateOrderRequest {
-  int64 user_id = 1;              // ID пользователя (в gRPC можно передавать и через metadata)
-  repeated OrderItem items = 2;   // Позиции заказа
-  // Статус при создании всегда 'pending', не передаем его
+  int64 user_id = 1;              
+  repeated OrderItem items = 2;   
 }
 
-// Ответ содержит созданный заказ
-// message CreateOrderResponse { Order order = 1; } // Или просто Order
-
-// Запрос на получение заказа по ID
 message GetOrderRequest {
-  int64 id = 1; // ID заказа
-  // user_id для проверки авторизации будет браться из metadata в реализации сервера
+  int64 id = 1; 
 }
 
-// Ответ содержит найденный заказ
-// message GetOrderResponse { Order order = 1; } // Или просто Order
-
-// Запрос на обновление статуса заказа
 message UpdateOrderStatusRequest {
-  int64 id = 1;           // ID заказа
-  OrderStatus status = 2; // Новый статус
-  // user_id для проверки авторизации будет браться из metadata
-}
+  int64 id = 1;          
+  OrderStatus status = 2;
 
-// Ответ содержит обновленный заказ
-// message UpdateOrderStatusResponse { Order order = 1; } // Или просто Order
-
-// Запрос на получение списка заказов пользователя
 message ListOrdersRequest {
-  int64 user_id = 1; // ID пользователя, чьи заказы нужны
-  int32 limit = 2;   // Пагинация
-  int32 offset = 3;  // Пагинация
+  int64 user_id = 1; 
+  int32 limit = 2;   
+  int32 offset = 3;  
 }
 
-// Ответ содержит список заказов
 message ListOrdersResponse {
   repeated Order orders = 1;
 }
 
 
-// --- Сервис Заказов ---
 
 service OrderService {
-  // Создать новый заказ
   rpc CreateOrder(CreateOrderRequest) returns (Order);
 
-  // Получить детали заказа по ID (с проверкой user_id из metadata)
   rpc GetOrder(GetOrderRequest) returns (Order);
 
-  // Обновить статус заказа (с проверкой user_id из metadata)
   rpc UpdateOrderStatus(UpdateOrderStatusRequest) returns (Order);
 
-  // Получить список заказов пользователя
   rpc ListOrders(ListOrdersRequest) returns (ListOrdersResponse);
 }
